@@ -26,6 +26,7 @@ lint-changes:
 	etc/lint_changes.py CHANGES.rst
 
 lint:
+	vermin --target=3.6- --violations alectryon
 	pylint --rcfile=setup.cfg alectryon
 	mypy alectryon/
 	pyright --project .

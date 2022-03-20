@@ -1,4 +1,5 @@
 PYTHON ?= python3
+export PYTHONIOENCODING =? "utf-8"
 
 test:
 	+$(MAKE) -C recipes clean

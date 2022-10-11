@@ -54,8 +54,9 @@ class StringView:
     def __repr__(self):
         return repr(str(self))
 
-    def split(self, sep, nsplits=None, keepsep=False):
-        beg, chunks = self.beg, []
+    def split(self, sep: str, nsplits=None, keepsep=False) -> List["StringView"]:
+        beg = self.beg
+        chunks: List[StringView] = []
         while beg <= self.end:
             end = self.s.find(sep, beg, self.end)
             if end < 0 or nsplits and len(chunks) == nsplits:
@@ -66,10 +67,10 @@ class StringView:
             beg = end + len(sep)
         return chunks
 
-    def match(self, regexp: re.Pattern) -> Optional[re.Match]:
+    def match(self, regexp: Pattern[str]) -> Optional[re.Match]:
         return regexp.match(self.s, self.beg, self.end)
 
-    def search(self, regexp: re.Pattern) -> Optional[re.Match]:
+    def search(self, regexp: Pattern[str]) -> Optional[re.Match]:
         return regexp.search(self.s, self.beg, self.end)
 
     def trim(self, beg=None, end=None):
@@ -99,8 +100,12 @@ class Line:
         return Line(-1, l)
 
     @staticmethod
+    def of_view(v: StringView):
+        return Line.of_parts([v])
+
+    @staticmethod
     def of_str(s: str):
-        return Line.of_parts([StringView(s, 0, len(s))])
+        return Line.of_view(StringView(s))
 
     def __len__(self):
         """Compute the number of characters in `self`.
@@ -140,11 +145,11 @@ class Line:
         return self
 
     def replace(self, src: str, dst: str) -> "Line":
-        parts = []
+        parts: List[StringView] = []
         for part in self.parts:
             for idx, p in enumerate(part.split(src)):
                 if idx > 0:
-                    parts.append(dst)
+                    parts.append(StringView(dst))
                 parts.append(p)
         return self._replace_parts(parts=parts)
 
@@ -177,7 +182,7 @@ def strip_deque(lines: Deque[Line]) -> Deque[Line]:
 T = TypeVar("T")
 def sliding_window(seq: Iterable[T], n) -> Iterable[Tuple[T, ...]]:
     seq = iter(seq)
-    window = deque(maxlen=n)
+    window: Deque[T] = deque(maxlen=n)
     for item in seq:
         if len(window) == n:
             yield tuple(window)
@@ -191,11 +196,11 @@ def mark_point(lines: Iterable[Line], point: Optional[int], marker: str) -> Iter
         last_line = nextl is None
         if point is not None:
             if isinstance(l, Line):
-                parts = []
+                parts: List[StringView] = []
                 for p in l.parts:
                     if point is not None and isinstance(p, StringView) and p.end >= point:
                         cutoff = max(0, min(point - p.beg, len(p)))
-                        parts.extend((p[:cutoff], marker, p[cutoff:]))
+                        parts.extend(map(StringView, (p[:cutoff], marker, p[cutoff:])))
                         point = None
                     else:
                         parts.append(p)
@@ -317,7 +322,7 @@ class BlockParser(Parser):
         return self.spans
 
 class LineParser(Parser):
-    LIT_HEADER_RE: re.Pattern
+    LIT_HEADER_RE: Pattern[str]
 
     @classmethod
     def _classify(cls, lines: List[StringView]) -> Iterator[Classified]:
@@ -396,7 +401,7 @@ class BlockLangDef(LangDef):
 
 class LineLangDef(LangDef):
     def __init__(self, name: str, parser: Type[Parser],
-                 lit_header: str, lit_header_re: re.Pattern[str]):
+                 lit_header: str, lit_header_re: Pattern[str]):
         super().__init__(name, parser)
         self.lit_header = lit_header
         self.lit_header_re = lit_header_re
@@ -658,9 +663,10 @@ class ParsedLitBlock(NamedTuple):
     directive: Sequence[Line]
     body_indent: int
     directive_indent: int
+
     @staticmethod
-    def of_lines(footer: Sequence[Line], lines: Deque[Line], directive: Sequence[Line],
-                 last_indent: int) -> "ParsedLitBlock":
+    def of_lines(footer: MutableSequence[Line], lines: Deque[Line],
+                 directive: Sequence[Line], last_indent: int) -> "ParsedLitBlock":
         strip_deque(lines)
         if lines:
             last_indent = measure_indentation(lines[-1])
@@ -793,7 +799,7 @@ class IndentedMarkup(RegexMarkup):
 
     def code_as_markup(self, block: CodeBlock) -> Iterable[Line]:
         block = block._replace(
-            directive=block.directive or [StringView(" " * block.indent + self.header)],
+            directive=block.directive or [Line.of_str(" " * block.indent + self.header)],
             lines=deque(self.indent_code(block)))
         for c in self.wrap_code(block):
             yield c.v
@@ -813,7 +819,7 @@ class BracketedMarkup(RegexMarkup):
     def parse_lit(self, lines: Deque[Line], last_indent: int) -> ParsedLitBlock:
         strip_deque(lines)
 
-        directive = deque()
+        directive: Deque[Line] = deque()
         footer = [lines.popleft()] if lines and lines[0].match(self.footer_re) else []
 
         while lines: # Look for header
@@ -822,7 +828,7 @@ class BracketedMarkup(RegexMarkup):
                 strip_deque(lines)
                 break
         else:
-            lines, directive = directive, []
+            lines, directive = directive, deque()
 
         # Block based: ignore last_indent
         indent = measure_indentation(directive[0]) if directive else 0
@@ -844,8 +850,8 @@ class BracketedMarkup(RegexMarkup):
 
     def code_as_markup(self, block: CodeBlock) -> Iterable[Line]:
         block = block._replace(
-            directive=block.directive or [StringView(self.header)],
-            footer=block.footer or [StringView(self.footer)],
+            directive=block.directive or [Line.of_str(self.header)],
+            footer=block.footer or [Line.of_str(self.footer)],
             lines=deque(self.indent_code(block)))
         for c in self.wrap_code(block):
             yield c.v
@@ -918,7 +924,8 @@ def split_lines_numbered(text: StringView, start: int) \
     return number_lines(split_lines(text), start) if text else (start, deque([]))
 
 def parsed_blocks_of_partition(md: MarkupDef, spans: Iterable[Classified]) -> Iterable[ParsedBlock]:
-    linum, last = 0, None
+    linum = 0
+    last: Optional[ParsedLitBlock] = None
     for span in spans:
         if isinstance(span, Comment):
             linestrs = md.lang.unwrap_literate(span.v)
@@ -939,7 +946,9 @@ def blocks_of_parsed_blocks(md: MarkupDef, parsed: List[ParsedBlock]):
                     span.lines.appendleft(span.footer.pop())
             yield LitBlock(span.lines, span.body_indent)
         else:
-            redundant_directive, directive, footer, indent = False, [], [], 0
+            redundant_directive, indent = False, 0
+            directive: Sequence[Line] = []
+            footer: Sequence[Line] = []
             if idx - 1 >= 0:
                 prev = cast(ParsedLitBlock, parsed[idx - 1])
                 redundant_directive = md.has_redundant_directive(prev)
@@ -976,10 +985,12 @@ def _partition_literate(code, spans, literate_matcher):
     if code_acc:
         yield Code(code_acc)
 
+def _make_matcher(p: Pattern) -> Callable[[StringView], bool]:
+    return lambda s: bool(s.match(p))
+
 def partition_literate(lang: LangDef, code: str,
                        opener: Optional[Pattern]=None) -> Iterable[Classified]:
-    matcher: Callable[[StringView], bool] = \
-        (lambda s: bool(s.match(opener))) if opener else lang.is_literate_comment
+    matcher = _make_matcher(opener) if opener else lang.is_literate_comment
     return _partition_literate(code, partition(lang, code), matcher)
 
 def code2markup_lines(md: MarkupDef, code: str):
@@ -1026,13 +1037,13 @@ def markup_parse(md: MarkupDef, s: str) -> Iterator[ParsedBlock]:
                                   Line(3, ['    exact I. Qed.'])]))]
     """
     beg, linum, last_indent = 0, 0, 0
-    last_footer: Sequence[Line] = []
-    for (start, end), directive, code, footer in md.scan_markup(s):
-        markup = StringView(s, beg, start)
-        linum, markup = split_lines_numbered(markup, linum)
-        linum, directive = split_lines_numbered(directive, linum)
-        linum, code = split_lines_numbered(code, linum)
-        linum, footer = split_lines_numbered(footer, linum)
+    last_footer: MutableSequence[Line] = []
+    for (start, end), directive_v, code_v, footer_v in md.scan_markup(s):
+        markup_v = StringView(s, beg, start)
+        linum, markup = split_lines_numbered(markup_v, linum)
+        linum, directive = split_lines_numbered(directive_v, linum)
+        linum, code = split_lines_numbered(code_v, linum)
+        linum, footer = split_lines_numbered(footer_v, linum)
         lit = ParsedLitBlock.of_lines(last_footer, markup, directive, last_indent)
         yield lit
         yield ParsedCodeBlock(code)

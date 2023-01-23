@@ -621,7 +621,7 @@ class AlectryonPostTransform(OneTimeTransform):
     def init_generator(self):
         formats = set(self._formats())
         style = _docutils_config(self.document, "pygments_style")
-        if 'html' in formats:
+        if {'html', 'xml'} & formats:
             highlighter = make_highlighter("html", None, style)
             return "html", html.HtmlGenerator(
                 highlighter, _gensym_stem(self.document), HTML_MINIFICATION)
